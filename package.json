@@ -1,6 +1,7 @@
 {
   "name": "pi-agent-workbench",
   "version": "0.1.0",
+  "license": "MIT OR BSD-3-Clause",
   "private": true,
   "type": "module",
   "exports": {

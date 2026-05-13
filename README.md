@@ -39,6 +39,10 @@ npm install
 npm test
 ```
 
+## License
+
+Dual-licensed under MIT OR BSD-3-Clause. See [LICENSE](LICENSE).
+
 For local development without installing the package:
 
 ```bash
