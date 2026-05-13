@@ -9,6 +9,10 @@
       "default": "./dist/src/index.js"
     }
   },
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["src/extensions/workbench.ts"]
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

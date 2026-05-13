@@ -64,10 +64,16 @@ type ControlMode = "manual" | "workflow" | "llm-delegated" | "hybrid";
 
 Known event types:
 
+Milestone 02 planning clarified runtime and parent prompt lifecycle semantics while the implementation was still greenfield. The core contract includes `runtime_attach`/`runtime_detach` for extension runtime attachment and `prompt_start`/`prompt_end` for pi parent agent-loop lifecycle. `run_start`/`run_end` remain logical observation-run creation/finalization events.
+
 ```ts
 type KnownObservationEventType =
   | "run_start"
+  | "runtime_attach"
+  | "runtime_detach"
   | "run_end"
+  | "prompt_start"
+  | "prompt_end"
   | "turn_start"
   | "turn_end"
   | "message_start"
@@ -211,7 +217,7 @@ type RunRecord = {
   projectRoot?: string;
   storageRoot: string;
   controlMode: ControlMode;
-  status: "running" | "completed" | "failed" | "aborted" | "unknown";
+  status: "running" | "detached" | "completed" | "failed" | "aborted" | "unknown";
   startedAt: number;
   endedAt?: number;
   traceFile: string;
@@ -266,6 +272,7 @@ Rules:
   - `phase: "end", status: "completed"` increments `compactionCount`.
   - `phase: "end", status: "aborted"` increments `compactionAbortedCount`.
   - `phase: "end", status: "error"` increments `compactionErrorCount`.
+- Milestone 02 planning added runtime attachment status updates while the core implementation was still greenfield: `runtime_attach` updates run status to `running`; `runtime_detach` updates run status to `detached` and does not set `endedAt`.
 - `run_end` updates run status/end time in the trace store and recompute helper. Read status from `event.data.status`; valid statuses are `completed`, `failed`, `aborted`, and `unknown`. If missing/invalid, use `unknown`. Do not add a lifecycle-specific top-level field to `ObservationEvent`.
 - Non-`run_end` events must not update `RunRecord.status`; `error` increments error metrics only, and failed subagents remain projection-level state unless the runtime later emits `run_end` with failed/aborted status.
 
@@ -302,7 +309,8 @@ Required behavior:
 - `TraceStore.createRun()` must fail fast if the run ID already exists; it must not overwrite existing run records/traces.
 - The runtime manager, implemented in a later milestone, emits `run_start` and `run_end` through the normal sink.
 - `createRunRecord()` and `TraceStore.writeRun()` write `schemaVersion: 1` when missing and throw for explicit unsupported schema versions in MVP.
-- `TraceStore.writeRun()` must reject records whose `cwd`, `projectRoot`, or `storageRoot` conflict with the store's resolved metadata.
+- Milestone 02 planning clarified resume-from-subdirectory behavior while the implementation was still greenfield: `RunRecord.cwd` is the original run-creation cwd and may differ from a later `TraceStore.cwd` when resuming from another cwd in the same repository. `TraceStore.writeRun()` must preserve `record.cwd`, but must not reject an existing run solely because `record.cwd !== store.cwd`.
+- `TraceStore.writeRun()` must reject records whose `projectRoot` or `storageRoot` conflict with the store's resolved metadata. This preserves storage/project identity while allowing attach cwd changes to be recorded in `runtime_attach.data.cwd`.
 - `TraceStore.writeRun()` must reject `traceFile` paths outside `store.tracesDir`; MVP trace files stay under `<tracesDir>/<runId>.jsonl`.
 - `TraceStore.writeRun()` should use atomic-ish temp-file-then-rename writes for the mutable run JSON.
 - `TraceStore.appendEvent()` first validates that `event.runId` has an existing run record; missing run records are errors and must not create orphan traces.
@@ -323,7 +331,7 @@ Required behavior:
 - `TraceStore.listRuns()` returns runs sorted by `startedAt` descending; records with missing/invalid `startedAt` sort last.
 - `TraceStore.readTrace(runId)` uses the run record's `traceFile` path when available. If the run record or trace file is missing, return an empty array; do not discover orphan trace files in MVP.
 - `TraceStore.readRun()` returns `undefined` for a missing run file, but throws for invalid JSON, structurally invalid run records, or explicit unsupported schema versions. Missing `schemaVersion` is normalized to `1`.
-- Minimum `readRun()` validation requires string `runId`, `traceId`, `cwd`, `storageRoot`, valid known `controlMode`, valid known `status`, `traceFile`, finite non-negative numeric `startedAt`, and object `metrics`. Optional `spanId`, `sessionId`, and `sessionFile` must be non-empty strings when present. Optional `endedAt` must be a finite non-negative number when present. Trim IDs/classifier/path fields such as `runId`, `traceId`, `spanId`, `cwd`, `projectRoot`, `storageRoot`, `controlMode`, `status`, `traceFile`, `sessionId`, and `sessionFile`; do not trim user-facing `displayName`/`fallbackTitle`. Do not require `endedAt >= startedAt` in core validation. Do not deeply validate every metric field; normalize missing metric counters/defaults through metrics helpers when needed.
+- Minimum `readRun()` validation requires string `runId`, `traceId`, `cwd`, `storageRoot`, valid known `controlMode`, valid known `status` including `detached`, `traceFile`, finite non-negative numeric `startedAt`, and object `metrics`. Optional `spanId`, `sessionId`, and `sessionFile` must be non-empty strings when present. Optional `endedAt` must be a finite non-negative number when present. Trim IDs/classifier/path fields such as `runId`, `traceId`, `spanId`, `cwd`, `projectRoot`, `storageRoot`, `controlMode`, `status`, `traceFile`, `sessionId`, and `sessionFile`; do not trim user-facing `displayName`/`fallbackTitle`. Do not require `endedAt >= startedAt` in core validation. Do not deeply validate every metric field; normalize missing metric counters/defaults through metrics helpers when needed.
 
 Suggested API:
 
@@ -409,6 +417,6 @@ An independent implementation agent should not need to create another feature pl
 - Unknown metrics remain `undefined`, not `0`.
 - Invalid trace lines do not fail the whole trace read; tolerant read tests include blank lines, invalid JSON, unsupported schema versions, missing required fields, wrong runId, wrong traceId, and valid matching events.
 - Concurrent `appendEvent()` calls do not corrupt metrics in-process.
-- Run status tests cover `appendEvent(run_end)` updating persisted status/`endedAt`, `recomputeRunRecord()` deriving status/`endedAt` from the latest valid `run_end`, and non-`run_end` errors/subagent failures not changing run status.
+- Run status tests cover `appendEvent(runtime_attach)` updating persisted status to `running`, `appendEvent(runtime_detach)` updating persisted status to `detached` without setting `endedAt`, `appendEvent(run_end)` updating persisted terminal status/`endedAt`, `recomputeRunRecord()` deriving status/attachment from lifecycle events, non-lifecycle errors/subagent failures not changing run status, and `writeRun()` allowing the original `RunRecord.cwd` when a later store is rooted in another cwd under the same repository/storage root.
 - ID helper tests assert prefixes/basic shape/uniqueness, not brittle exact timestamp formatting.
 - Path resolution tests cover no-git cwd fallback, repo-root `.git/`, `.git` as a file, nested cwd under repo, and explicit `baseDir` overriding storage while still recording `projectRoot`.

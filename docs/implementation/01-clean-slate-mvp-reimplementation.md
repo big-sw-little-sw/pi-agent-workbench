@@ -100,12 +100,15 @@ Archived component specs under `docs/implementation/archive/` may be used as ref
 
 ## Resolved Core Implementation Decisions
 
-- Known event types include `run_start`, `run_end`, turn/message/tool lifecycle events, `usage`, `rate_limit`, `retry`, `fallback`, `compaction`, `error`, `artifact`, `subagent_start`, and `subagent_end`; the event type remains open to future strings.
+- Known event types include `run_start`, `runtime_attach`, `runtime_detach`, `run_end`, `prompt_start`, `prompt_end`, turn/message/tool lifecycle events, `usage`, `rate_limit`, `retry`, `fallback`, `compaction`, `error`, `artifact`, `subagent_start`, and `subagent_end`; the event type remains open to future strings.
 - `ObservationSource` includes `runtime` for workbench-owned lifecycle/infrastructure events.
 - Keep `RunRecord.controlMode` as the run default/initial mode, but event-level `controlMode` is the source of truth for mixed manual/delegated sessions.
-- Persist `run_start` and `run_end` in the trace as canonical history; `RunRecord` remains the mutable summary.
-- The runtime manager emits `run_start`/`run_end` through the normal sink; `TraceStore.createRun()` only creates the initial record.
+- Persist logical run lifecycle and runtime attachment events in the trace as canonical history; `RunRecord` remains the mutable summary.
+- `run_start` means logical observation-run creation; `runtime_attach`/`runtime_detach` mean extension runtime attachment/detachment; `run_end` is reserved for explicit logical run finalization.
+- `runtime_attach` updates run status to `running`; `runtime_detach` updates run status to `detached` without setting `endedAt`.
+- The runtime manager emits lifecycle events through the normal sink; `TraceStore.createRun()` only creates the initial record.
 - `TraceStore` stores project-local traces at the git repository root when `cwd` is inside a git repo; explicit `baseDir` overrides this, otherwise fallback is `cwd/.pi/workbench`; `RunRecord` stores absolute original `cwd`, resolved `projectRoot` when available, actual `storageRoot`, and absolute `traceFile`.
+- `RunRecord.cwd` is the original run-creation cwd and must be preserved across later attaches; resuming from another cwd in the same repository/storage root is valid and current attach cwd belongs in `runtime_attach.data.cwd`.
 - `TraceStore.appendEvent()` appends JSONL and updates persisted `RunRecord.metrics`; it should not emit additional events or own policy.
 - Serialize `appendEvent()` operations in-process per store/run to avoid races from parallel subagents; cross-process locking is out of scope.
 - `readTrace()` is tolerant: skip blank/invalid/structurally invalid lines and normalize missing `schemaVersion` to `1`.

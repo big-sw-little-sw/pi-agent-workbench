@@ -125,6 +125,7 @@ MVP:
 - observability, delegation, subagent, and monitor events for that parent session write into the same run/trace
 - `traceId` equals `runId` unless explicitly overridden
 - parent turns, tool calls, subagents, errors, rate limits, and fallbacks are events/spans inside that run
+- runtime attach/detach can occur multiple times inside the same resumable run across pi reload/quit/resume; attach/detach is distinct from logical run start/end
 
 IDs:
 

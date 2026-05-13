@@ -216,13 +216,20 @@ test("appendEvent validates run existence, trace matching, source, mode, timesta
   await assert.rejects(() => store.appendEvent(event({ runId: run.runId, traceId: run.traceId, parentSpanId: " " })), /parentSpanId/);
 });
 
-test("writeRun rejects conflicting storage metadata", async () => {
-  const cwd = await tmpDir();
-  const store = new TraceStore({ cwd });
+test("writeRun rejects conflicting storage metadata but preserves original cwd", async () => {
+  const root = await tmpDir();
+  await fs.mkdir(path.join(root, ".git"));
+  const nested = path.join(root, "nested");
+  await fs.mkdir(nested);
+  const store = new TraceStore({ cwd: root });
   const run = await store.createRun({ runId: "run_write", startedAt: 10 });
-  await assert.rejects(() => store.writeRun({ ...run, cwd: path.join(cwd, "other") }), /cwd/);
-  await assert.rejects(() => store.writeRun({ ...run, storageRoot: path.join(cwd, "other") }), /storageRoot/);
-  await assert.rejects(() => store.writeRun({ ...run, traceFile: path.join(cwd, "escape.jsonl") }), /outside/);
+  const nestedStore = new TraceStore({ cwd: nested });
+
+  await nestedStore.writeRun({ ...run, status: "detached" });
+  assert.equal((await store.readRun(run.runId))?.cwd, root);
+  assert.equal((await store.readRun(run.runId))?.status, "detached");
+  await assert.rejects(() => store.writeRun({ ...run, storageRoot: path.join(root, "other") }), /storageRoot/);
+  await assert.rejects(() => store.writeRun({ ...run, traceFile: path.join(root, "escape.jsonl") }), /outside/);
 });
 
 test("listRuns sorts by startedAt descending", async () => {
@@ -242,22 +249,35 @@ test("concurrent appendEvent calls serialize metrics updates", async () => {
   assert.equal((await store.readTrace(run.runId)).length, 25);
 });
 
-test("run status derives only from run_end events", async () => {
+test("run status derives from runtime attach/detach and run_end lifecycle", async () => {
   const cwd = await tmpDir();
   const store = new TraceStore({ cwd });
   const run = await store.createRun({ runId: "run_status", startedAt: 10 });
   await store.appendEvent(event({ runId: run.runId, traceId: run.traceId, eventType: "error", data: { status: "failed" } }));
   await store.appendEvent(event({ runId: run.runId, traceId: run.traceId, eventType: "subagent_end", data: { status: "failed" } }));
   assert.equal((await store.readRun(run.runId))?.status, "running");
+  await store.appendEvent(event({ runId: run.runId, traceId: run.traceId, eventType: "runtime_detach", timestamp: 250 }));
+  assert.equal((await store.readRun(run.runId))?.status, "detached");
+  assert.equal((await store.readRun(run.runId))?.endedAt, undefined);
+  await store.appendEvent(event({ runId: run.runId, traceId: run.traceId, eventType: "runtime_attach", timestamp: 275 }));
+  assert.equal((await store.readRun(run.runId))?.status, "running");
   await store.appendEvent(event({ runId: run.runId, traceId: run.traceId, eventType: "run_end", timestamp: 300, data: { status: "aborted" } }));
   assert.equal((await store.readRun(run.runId))?.status, "aborted");
 
   const recomputed = recomputeRunRecord({ record: run, events: [
     event({ runId: run.runId, traceId: run.traceId, eventType: "error", timestamp: 50 }),
+    event({ runId: run.runId, traceId: run.traceId, eventType: "runtime_detach", timestamp: 80 }),
+  ] });
+  assert.equal(recomputed.status, "detached");
+  assert.equal(recomputed.endedAt, undefined);
+  assert.equal(recomputed.metrics.errorCount, 1);
+
+  const recomputedEnded = recomputeRunRecord({ record: run, events: [
+    event({ runId: run.runId, traceId: run.traceId, eventType: "runtime_detach", timestamp: 80 }),
+    event({ runId: run.runId, traceId: run.traceId, eventType: "runtime_attach", timestamp: 90 }),
     event({ runId: run.runId, traceId: run.traceId, eventType: "run_end", timestamp: 100, data: { status: "completed" } }),
     event({ runId: run.runId, traceId: run.traceId, eventType: "run_end", timestamp: 200, data: { status: "nonsense" } }),
   ] });
-  assert.equal(recomputed.status, "unknown");
-  assert.equal(recomputed.endedAt, 200);
-  assert.equal(recomputed.metrics.errorCount, 1);
+  assert.equal(recomputedEnded.status, "unknown");
+  assert.equal(recomputedEnded.endedAt, 200);
 });

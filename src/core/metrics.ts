@@ -61,7 +61,7 @@ function isData(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function runEndStatusFromEvent(event: ObservationEvent): Exclude<RunStatus, "running"> {
+export function runEndStatusFromEvent(event: ObservationEvent): Exclude<RunStatus, "running" | "detached"> {
   const status = isData(event.data) ? event.data.status : undefined;
   return status === "completed" || status === "failed" || status === "aborted" || status === "unknown"
     ? status
@@ -112,7 +112,11 @@ export function recomputeRunRecord(input: { record: RunRecord; events: Observati
 
   for (const event of input.events) {
     metrics = applyEventToMetrics(metrics, event);
-    if (event.eventType === "run_end") {
+    if (event.eventType === "runtime_attach") {
+      status = "running";
+    } else if (event.eventType === "runtime_detach") {
+      status = "detached";
+    } else if (event.eventType === "run_end") {
       status = runEndStatusFromEvent(event);
       endedAt = event.timestamp;
     }

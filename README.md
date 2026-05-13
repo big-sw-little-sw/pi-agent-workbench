@@ -1,46 +1,88 @@
 # pi-agent-workbench
 
-A pi package for agent-workbench experiments: durable observability, subagents, opt-in LLM delegation, and later workflow/workbench analysis.
+A pi workbench extension for durable parent-session observability, with subagents and opt-in delegation planned in later MVP milestones.
 
-## Agent Instructions
+## Install
 
-Start with [`AGENTS.md`](./AGENTS.md).
-
-## Clean-Slate MVP
-
-The active MVP plan is a cohesive workbench vertical slice:
-
-- one `src/extensions/workbench.ts` entrypoint
-- parent observability
-- manual subagent commands
-- opt-in LLM delegation
-- process-based child pi runner
-- shared event trace/run store
-- minimal live status projection
-
-Older phase specs are archived under `docs/implementation/archive/`.
-
-## Planning Docs
-
-- Full design reference: [`docs/agent-workbench-design.md`](./docs/agent-workbench-design.md)
-- Implementation plan: [`docs/plan-readme.md`](./docs/plan-readme.md)
-- Active MVP plan: [`docs/implementation/01-clean-slate-mvp-reimplementation.md`](./docs/implementation/01-clean-slate-mvp-reimplementation.md)
-- Phase index: [`docs/implementation/README.md`](./docs/implementation/README.md)
-- Principles: [`docs/implementation/00-principles.md`](./docs/implementation/00-principles.md)
-- Contracts: [`docs/implementation/00-contracts-and-boundaries.md`](./docs/implementation/00-contracts-and-boundaries.md)
-- Stretch goals: [`docs/implementation/99-stretch-goals.md`](./docs/implementation/99-stretch-goals.md)
-
-## Scripts
+Install globally from GitHub:
 
 ```bash
+pi install git:github.com/big-sw-little-sw/pi-agent-workbench
+```
+
+Or install for the current project only:
+
+```bash
+pi install -l git:github.com/big-sw-little-sw/pi-agent-workbench
+```
+
+Pi packages run with your local permissions. Review the source before installing.
+
+## Use
+
+From any project you want to observe, start pi normally after installation:
+
+```bash
+pi
+```
+
+Then run:
+
+```text
+/observe status
+```
+
+## Development
+
+```bash
+npm install
 npm test
 ```
 
-## Later Manual pi Loading
-
-Once the extension entrypoint exists:
+For local development without installing the package:
 
 ```bash
 pi --no-extensions \
   -e ~/sw/code/pi-agent-workbench/src/extensions/workbench.ts
 ```
+
+## Observability Quick Start
+
+1. Install the package, or load the extension with `-e` for local development.
+2. Use pi normally.
+3. Run:
+
+```text
+/observe status
+```
+
+The status command is read-only and shows the current workbench run, trace path, run status, known metrics, and warnings.
+
+Default storage is project-local:
+
+```text
+.pi/workbench/runs/<run-id>.json
+.pi/workbench/traces/<run-id>.jsonl
+```
+
+When launched inside a git repository, storage is rooted at the git repository root.
+
+## Run Lifecycle
+
+- `run_start`: written once when a logical workbench observation run is created.
+- `runtime_attach`: written whenever the extension attaches to the run, including reload/resume.
+- `runtime_detach`: written on normal pi shutdown/reload; the run remains resumable.
+- `run_end`: reserved for explicit future finalization, not normal shutdown.
+
+Statuses:
+
+- `running`: a workbench runtime is currently attached.
+- `detached`: the run is open/resumable but no runtime is currently attached.
+
+If a persisted session-to-run link is invalid, workbench creates a replacement run and `/observe status` warns that metrics may be incomplete.
+
+## Privacy
+
+Parent observability records lifecycle, usage, tool names/status, and small metadata. It does not persist full prompts, assistant messages, streaming chunks, tool arguments, or tool results by default.
+
+Subagent commands and delegation are not available yet; they will be documented when implemented.

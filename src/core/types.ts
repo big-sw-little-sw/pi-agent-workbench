@@ -10,7 +10,11 @@ export type ControlMode = "manual" | "workflow" | "llm-delegated" | "hybrid";
 
 export type KnownObservationEventType =
   | "run_start"
+  | "runtime_attach"
+  | "runtime_detach"
   | "run_end"
+  | "prompt_start"
+  | "prompt_end"
   | "turn_start"
   | "turn_end"
   | "message_start"
@@ -90,7 +94,7 @@ export type RunMetrics = UsageBreakdown & {
   compactionErrorCount: number;
 };
 
-export type RunStatus = "running" | "completed" | "failed" | "aborted" | "unknown";
+export type RunStatus = "running" | "detached" | "completed" | "failed" | "aborted" | "unknown";
 
 export type RunRecord = {
   schemaVersion?: number;

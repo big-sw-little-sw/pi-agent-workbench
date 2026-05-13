@@ -13,7 +13,7 @@ import type { ControlMode, ObservationEvent, ObservationSource, RunMetrics, RunR
 
 const sources: readonly ObservationSource[] = ["runtime", "parent", "subagent", "workflow", "delegation", "evaluator"];
 const controlModes: readonly ControlMode[] = ["manual", "workflow", "llm-delegated", "hybrid"];
-const statuses: readonly RunStatus[] = ["running", "completed", "failed", "aborted", "unknown"];
+const statuses: readonly RunStatus[] = ["running", "detached", "completed", "failed", "aborted", "unknown"];
 
 export type WorkbenchPaths = {
   cwd: string;
@@ -219,6 +219,15 @@ async function exists(file: string): Promise<boolean> {
   }
 }
 
+async function readable(file: string): Promise<boolean> {
+  try {
+    await fs.access(file, fsSync.constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isPathInsideOrEqual(parent: string, child: string): boolean {
   const relative = path.relative(parent, child);
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -295,7 +304,11 @@ export class TraceStore {
     await fs.appendFile(record.traceFile, `${JSON.stringify(normalized)}\n`);
     let metrics = applyEventToMetrics(record.metrics, normalized);
     let updated: RunRecord = { ...record, metrics };
-    if (normalized.eventType === "run_end") {
+    if (normalized.eventType === "runtime_attach") {
+      updated = { ...updated, status: "running" };
+    } else if (normalized.eventType === "runtime_detach") {
+      updated = { ...updated, status: "detached" };
+    } else if (normalized.eventType === "run_end") {
       updated = { ...updated, status: runEndStatusFromEvent(normalized), endedAt: normalized.timestamp };
     }
     await this.writeRun(updated);
@@ -311,7 +324,6 @@ export class TraceStore {
 
   async writeRun(record: RunRecord): Promise<void> {
     const normalized = validateRecord(prepareWriteSchemaVersion(record));
-    if (normalized.cwd !== this.cwd) throw new Error("Run cwd conflicts with store");
     if ((normalized.projectRoot ?? undefined) !== (this.projectRoot ?? undefined)) throw new Error("Run projectRoot conflicts with store");
     if (normalized.storageRoot !== this.storageRoot) throw new Error("Run storageRoot conflicts with store");
     if (!isPathInsideOrEqual(this.tracesDir, normalized.traceFile)) throw new Error("Run traceFile is outside tracesDir");
@@ -343,6 +355,16 @@ export class TraceStore {
       const bt = Number.isFinite(b.startedAt) ? b.startedAt : -1;
       return bt - at;
     });
+  }
+
+  async traceFileIsReadable(record: RunRecord): Promise<boolean> {
+    const normalized = validateRecord(record);
+    if ((normalized.projectRoot ?? undefined) !== (this.projectRoot ?? undefined)) throw new Error("Run projectRoot conflicts with store");
+    if (normalized.storageRoot !== this.storageRoot) throw new Error("Run storageRoot conflicts with store");
+    if (!isPathInsideOrEqual(this.tracesDir, normalized.traceFile)) throw new Error("Run traceFile is outside tracesDir");
+    const expectedTrace = path.join(this.tracesDir, `${normalized.runId}.jsonl`);
+    if (normalized.traceFile !== expectedTrace) throw new Error("Run traceFile must match runId");
+    return readable(normalized.traceFile);
   }
 
   async readTrace(runId: string): Promise<ObservationEvent[]> {
