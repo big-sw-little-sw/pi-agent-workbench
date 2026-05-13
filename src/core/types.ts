@@ -167,6 +167,8 @@ export type AgentDefinition = {
   tools?: string[];
   source: "user" | "project" | "package";
   filePath?: string;
+  systemPromptMode?: "append" | "replace";
+  loadContextFiles?: boolean;
 };
 
 export type ModelIqRequest = {

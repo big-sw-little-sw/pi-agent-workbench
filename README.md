@@ -56,7 +56,7 @@ pi --no-extensions \
 /observe status
 ```
 
-The status command is read-only and shows the current workbench run, trace path, run status, known metrics, and warnings.
+The status command is read-only and shows the current workbench run, trace path, run status, known metrics, and warnings. It also shows terse config/catalog warning or error counts when named-agent loading has diagnostics.
 
 Default storage is project-local:
 
@@ -80,6 +80,24 @@ Statuses:
 - `detached`: the run is open/resumable but no runtime is currently attached.
 
 If a persisted session-to-run link is invalid, workbench creates a replacement run and `/observe status` warns that metrics may be incomplete.
+
+## Config and Named Agent Catalog
+
+Config files are optional JSON files:
+
+```text
+~/.pi/agent/workbench/config.json
+<project>/.pi/workbench/config.json
+```
+
+Project config overrides global config field-by-field. Named agent markdown files are discovered from:
+
+```text
+~/.pi/agent/workbench/agents/*.md
+<project>/.pi/workbench/agents/*.md
+```
+
+Project agents are skipped unless the effective config sets `agents.trustProjectAgents: true`. `/subagent` commands are not available yet.
 
 ## Privacy
 

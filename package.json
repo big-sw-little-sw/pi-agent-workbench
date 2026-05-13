@@ -9,9 +9,13 @@
       "default": "./dist/src/index.js"
     }
   },
-  "keywords": ["pi-package"],
+  "keywords": [
+    "pi-package"
+  ],
   "pi": {
-    "extensions": ["src/extensions/workbench.ts"]
+    "extensions": [
+      "src/extensions/workbench.ts"
+    ]
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -24,5 +28,8 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.74.0",
     "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
   }
 }

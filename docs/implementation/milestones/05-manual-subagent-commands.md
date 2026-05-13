@@ -118,6 +118,23 @@ Manual runs should produce:
 
 Use `controlMode: "manual"`.
 
+## User Docs and Examples
+
+Milestone 05 should add the first fuller user-facing named-agent documentation because this is when users can list and run agents.
+
+Add:
+
+```text
+docs/user/agents.md
+examples/agents/code-reviewer.md
+```
+
+`docs/user/agents.md` should cover config locations, agent locations, frontmatter fields, trust behavior, diagnostics/status behavior, `/subagent list`, `/subagent run`, `/subagent adhoc`, and concise examples of global/project agents.
+
+`examples/agents/code-reviewer.md` should be reference-only copy/paste material for a simple named agent. Keep examples small and aligned with the Milestone 03 catalog contract.
+
+Update `README.md` to link to `docs/user/agents.md` rather than becoming a full manual.
+
 ## Progress/Status
 
 Keep output concise.

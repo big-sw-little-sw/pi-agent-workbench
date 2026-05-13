@@ -1,13 +1,39 @@
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { registerParentObserver } from "../observability/parent-observer.js";
 import { relativeToCwd, WorkbenchRuntime, isWorkbenchRuntimeLink } from "../runtime/workbench-runtime.js";
+import { loadWorkbenchConfig } from "../config/workbench-config.js";
+import { loadAgentCatalog } from "../subagents/agent-catalog.js";
 import type { WorkbenchRuntimeLink } from "../runtime/workbench-runtime.js";
 import type { RunRecord, RunMetrics } from "../core/types.js";
+import type { WorkbenchDiagnostic } from "../core/diagnostics.js";
+import type { WorkbenchConfigLoadResult } from "../config/workbench-config.js";
+import type { AgentCatalog } from "../subagents/agent-catalog.js";
 
 const LINK_TYPE = "workbench-runtime";
 
+export type WorkbenchServices = {
+  configLoadResult?: WorkbenchConfigLoadResult;
+  agentCatalog?: AgentCatalog;
+  startupDiagnostics: WorkbenchDiagnostic[];
+};
+
+export type WorkbenchExtensionOptions = {
+  loadConfig?: typeof loadWorkbenchConfig;
+  loadCatalog?: typeof loadAgentCatalog;
+  homeDir?: string;
+};
+
 export default function workbenchExtension(pi: ExtensionAPI): void {
+  createWorkbenchExtension()(pi);
+}
+
+export function createWorkbenchExtension(options: WorkbenchExtensionOptions = {}): (pi: ExtensionAPI) => void {
+  return (pi: ExtensionAPI): void => registerWorkbench(pi, options);
+}
+
+function registerWorkbench(pi: ExtensionAPI, options: WorkbenchExtensionOptions): void {
   const runtime = new WorkbenchRuntime({ cwd: process.cwd() });
+  const services: WorkbenchServices = { startupDiagnostics: [] };
 
   pi.on("session_start", async (event, ctx) => {
     try {
@@ -20,6 +46,7 @@ export default function workbenchExtension(pi: ExtensionAPI): void {
         existingLinks: extractLinks(ctx),
         appendLink: (link) => pi.appendEntry(LINK_TYPE, link),
       });
+      await loadStartupServices(services, ctx, options);
     } catch (error) {
       runtime.markTraceWriteFailed(error);
       ctx.ui.notify(`workbench failed to initialize; observability disabled: ${shortMessage(error)}`, "warning");
@@ -35,7 +62,7 @@ export default function workbenchExtension(pi: ExtensionAPI): void {
         ctx.ui.notify("usage: /observe status", "info");
         return;
       }
-      await showStatus(runtime, ctx);
+      await showStatus(runtime, services, ctx);
     },
   });
 
@@ -46,6 +73,22 @@ export default function workbenchExtension(pi: ExtensionAPI): void {
       runtime.markTraceWriteFailed(error);
     }
   });
+}
+
+async function loadStartupServices(services: WorkbenchServices, ctx: ExtensionContext, options: WorkbenchExtensionOptions): Promise<void> {
+  services.startupDiagnostics = [];
+  services.configLoadResult = undefined;
+  services.agentCatalog = undefined;
+  try {
+    const configLoadResult = await (options.loadConfig ?? loadWorkbenchConfig)({ cwd: ctx.cwd, homeDir: options.homeDir });
+    const agentCatalog = await (options.loadCatalog ?? loadAgentCatalog)({ cwd: ctx.cwd, homeDir: options.homeDir, config: configLoadResult });
+    services.configLoadResult = configLoadResult;
+    services.agentCatalog = agentCatalog;
+    services.startupDiagnostics = [...configLoadResult.diagnostics, ...agentCatalog.diagnostics];
+  } catch (error) {
+    services.startupDiagnostics = [{ severity: "error", code: "startup_config_catalog_failed", message: shortMessage(error), hint: "subagents unavailable until reload succeeds" }];
+    safeCall(() => ctx.ui.notify("workbench config/catalog load failed; subagents unavailable", "warning"));
+  }
 }
 
 function extractLinks(ctx: ExtensionContext): WorkbenchRuntimeLink[] {
@@ -60,7 +103,7 @@ function extractLinks(ctx: ExtensionContext): WorkbenchRuntimeLink[] {
   return links;
 }
 
-async function showStatus(runtime: WorkbenchRuntime, ctx: ExtensionCommandContext): Promise<void> {
+async function showStatus(runtime: WorkbenchRuntime, services: WorkbenchServices, ctx: ExtensionCommandContext): Promise<void> {
   const status = runtime.getStatus();
   if (!status.initialized || !status.run) {
     ctx.ui.notify("workbench: not initialized", "info");
@@ -84,6 +127,7 @@ async function showStatus(runtime: WorkbenchRuntime, ctx: ExtensionCommandContex
     status.metricsMayBeIncomplete ? "metrics may be incomplete" : undefined,
     status.traceWriteFailed ? "trace writes degraded" : undefined,
     status.sessionFileChanged ? "session file changed" : undefined,
+    diagnosticSummary(services.startupDiagnostics, "config/catalog"),
   ].filter((value): value is string => Boolean(value));
   if (warnings.length) lines.push(`warnings: ${warnings.join("; ")}`);
   ctx.ui.notify(lines.join("\n"), warnings.length ? "warning" : "info");
@@ -109,6 +153,13 @@ export function formatMetrics(metrics: RunMetrics): string {
     metrics.costUsd === undefined ? undefined : `cost=$${metrics.costUsd.toFixed(4)}`,
   ].filter((part): part is string => Boolean(part));
   return [...parts, ...usageParts].join(" ");
+}
+
+function diagnosticSummary(diagnostics: WorkbenchDiagnostic[], label: string): string | undefined {
+  const warnings = diagnostics.filter((diagnostic) => diagnostic.severity === "warning").length;
+  const errors = diagnostics.filter((diagnostic) => diagnostic.severity === "error").length;
+  const parts = [warnings ? `${label} warnings=${warnings}` : undefined, errors ? `${label} errors=${errors}` : undefined].filter(Boolean);
+  return parts.length ? parts.join(" ") : undefined;
 }
 
 function metricPart(label: string, value: number | undefined): string | undefined {
