@@ -1,5 +1,7 @@
 # Milestone 03 — Config + Agent Catalog
 
+Follow-on: `03-1-observability-metrics-export.md` extends the config surface with observability metrics export after this milestone.
+
 ## Goal
 
 Implement configuration loading and markdown agent discovery/validation for named subagents.

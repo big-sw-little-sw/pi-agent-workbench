@@ -60,6 +60,8 @@ Live-state should derive bucketed counts:
 
 Subagent counts/statuses are derived from `subagent_start`/`subagent_end`; they are not stored in MVP `RunMetrics`.
 
+Milestone 03-1 metrics export intentionally includes only aggregate `RunMetrics` plus run metadata/warnings. If exported reports later need subagent counts or richer activity summaries, source them from this live-state projection rather than adding subagent-specific counters to core `RunMetrics`.
+
 ## Minimal Monitor
 
 Keep it small and low-risk.
@@ -128,6 +130,7 @@ Test:
 - subagent lifecycle projection
 - retry/rate-limit/error counts
 - per-agent tool counts
+- export/report-oriented projection helpers remain separate from core `RunMetrics`
 - out-of-order or missing end-event tolerance where reasonable
 
 ## Acceptance Criteria

@@ -18,6 +18,7 @@ Use `docs/agent-workbench-design.md` only as the long-form reference.
 - `milestones/01-core-trace-foundation.md`
 - `milestones/02-runtime-parent-observability.md`
 - `milestones/03-config-agent-catalog.md`
+- `milestones/03-1-observability-metrics-export.md` — follow-on CLI/env/config-driven metrics export
 - `milestones/04-subagent-runner.md`
 - `milestones/05-manual-subagent-commands.md`
 - `milestones/06-delegation-mvp.md`

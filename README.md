@@ -58,6 +58,60 @@ pi --no-extensions \
 
 The status command is read-only and shows the current workbench run, trace path, run status, known metrics, and warnings. It also shows terse config/catalog warning or error counts when named-agent loading has diagnostics.
 
+Observability also works when pi runs headless. For headless/CI runs, configure metrics export with CLI flags, environment variables, or user/project config so a JSON report is written on graceful shutdown.
+
+Export a JSON metrics report interactively:
+
+```text
+/observe dump metrics/workbench-metrics.json
+/observe dump --template metrics/{runId}.json
+```
+
+Enable export on graceful pi shutdown with environment variables:
+
+```bash
+PI_WORKBENCH_METRICS_FILE='./metrics/{runId}.json' \
+PI_WORKBENCH_METRICS_TEMPLATE=true \
+pi
+```
+
+Or with extension flags when starting pi:
+
+```bash
+pi \
+  --workbench-metrics-file './metrics/{runId}.json' \
+  --workbench-metrics-export onShutdown \
+  --workbench-metrics-template
+```
+
+For a headless run, combine the same export settings with pi's non-interactive mode:
+
+```bash
+PI_WORKBENCH_METRICS_FILE='./metrics/{runId}.json' \
+PI_WORKBENCH_METRICS_TEMPLATE=true \
+pi --mode json -p "summarize this repository"
+```
+
+Config may also enable export at either level:
+
+```text
+~/.pi/agent/workbench/config.json
+<project>/.pi/workbench/config.json
+```
+
+```json
+{
+  "schemaVersion": 1,
+  "observability": {
+    "metricsExportFile": "./metrics/workbench-metrics.json",
+    "metricsExportMode": "onShutdown",
+    "metricsExportTemplate": false
+  }
+}
+```
+
+Project config overrides user/global config field-by-field. Precedence is CLI flag, environment, project config, global config, defaults. `{runId}` is the current workbench observation run ID used to correlate the run summary and trace; separate pi invocations normally get different run IDs, so templated export paths avoid clashes. Quote shell values containing `{runId}` as shown above so your shell does not perform brace expansion; slash-command examples do not need quotes unless the path contains spaces. Review project `.pi/workbench/config.json` before loading the extension: project config can configure filesystem writes. Absolute export paths are allowed for config/env/CLI/slash commands and are treated as explicit user-controlled writes.
+
 Default storage is project-local:
 
 ```text
@@ -90,7 +144,7 @@ Config files are optional JSON files:
 <project>/.pi/workbench/config.json
 ```
 
-Project config overrides global config field-by-field. Named agent markdown files are discovered from:
+Project config overrides global config field-by-field. The `observability.metricsExportFile` option may be relative to the project root or absolute; project config with an absolute export path is allowed but reported as a warning. Named agent markdown files are discovered from:
 
 ```text
 ~/.pi/agent/workbench/agents/*.md

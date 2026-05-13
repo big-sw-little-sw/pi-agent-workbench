@@ -107,6 +107,7 @@ Owns:
 - parent event subscriptions
 - trace store integration
 - live state store
+- CLI/env/config-driven metrics export
 - `/observe ...` commands
 
 Does not own:

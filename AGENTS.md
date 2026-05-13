@@ -45,6 +45,15 @@ Stretch goals live in `docs/implementation/99-stretch-goals.md`.
 - Unknown token/cache metrics are unavailable/undefined, not zero.
 - Writers should write `schemaVersion: 1`; readers must treat missing schema version as `1`.
 
+## Precedence and Config Rules
+
+- Higher-precedence layers may override lower layers only with values explicitly provided by that source.
+- Do not treat API defaults, especially boolean `false`, as user-provided presence unless the API can distinguish unset from explicitly set.
+- Normalize precedence inputs into explicit presence metadata (for example `{ value, present }`) before overlaying layers.
+- For enable-only CLI booleans, treat `true` as present and `false`/`undefined` as absent unless a real negating flag exists.
+- Add precedence matrix tests for new CLI/env/config settings: lower true + higher absent/default, lower false + higher true, explicit off/disable, file-only implied enable, and invalid higher values.
+- Prefer shared overlay helpers over ad hoc precedence loops.
+
 ## MVP Simplifications
 
 - Subagents are single-level: child agents cannot spawn subagents.

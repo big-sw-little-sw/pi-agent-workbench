@@ -54,6 +54,31 @@ test("config global/project deep merge, invalid fallback, invalid JSON, and unkn
   assert.equal(invalid.effectiveConfig.subagents.defaultTimeoutMs, 1234);
 });
 
+test("config observability export fields merge, validate, and warn", async () => {
+  const home = await tmpDir();
+  const cwd = await tmpDir();
+  await fs.mkdir(path.join(cwd, ".git"));
+  await writeJson(path.join(home, ".pi/agent/workbench/config.json"), {
+    observability: { metricsExportFile: "metrics/{runId}.json", metricsExportMode: "onShutdown", metricsExportTemplate: true },
+  });
+  await writeJson(path.join(cwd, ".pi/workbench/config.json"), {
+    observability: { metricsExportMode: "bad", metricsExportTemplate: false, metricsExportFile: path.join(cwd, "absolute.json") },
+  });
+  const result = await loadWorkbenchConfig({ cwd, homeDir: home });
+  assert.equal(result.effectiveConfig.observability.metricsExportMode, "onShutdown");
+  assert.equal(result.effectiveConfig.observability.metricsExportTemplate, false);
+  assert.equal(result.effectiveConfig.observability.metricsExportFile, path.join(cwd, "absolute.json"));
+  assert.equal(codes(result.diagnostics).includes("config_invalid_field"), true);
+  assert.equal(codes(result.diagnostics).includes("project_config_absolute_metrics_export"), true);
+
+  const fileOnlyHome = await tmpDir();
+  const fileOnlyCwd = await tmpDir();
+  await writeJson(path.join(fileOnlyCwd, ".pi/workbench/config.json"), { observability: { metricsExportFile: "metrics.json", metricsExportMode: "bad" } });
+  const fileOnly = await loadWorkbenchConfig({ cwd: fileOnlyCwd, homeDir: fileOnlyHome });
+  assert.equal(fileOnly.effectiveConfig.observability.metricsExportMode, "onShutdown");
+  assert.equal(fileOnly.effectiveConfig.observability.metricsExportFile, "metrics.json");
+});
+
 test("config project root resolution aligns with git and non-git cwd cases", async () => {
   const home = await tmpDir();
   const root = await tmpDir();

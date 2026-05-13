@@ -27,6 +27,7 @@ MVP phases:
 MVP includes:
 
 - durable JSONL traces and run summaries
+- CLI/env/config-driven metrics export for headless observability
 - parent-session observability
 - process-based child pi runner
 - basic markdown agent definitions

@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveWorkbenchPaths } from "../core/trace-store.js";
+import { overlayPresentFields } from "./merge.js";
 import type { WorkbenchDiagnostic } from "../core/diagnostics.js";
 
 export type WorkbenchConfig = {
@@ -9,6 +10,7 @@ export type WorkbenchConfig = {
   agents: { trustProjectAgents: boolean };
   subagents: { defaultTools: string[]; defaultTimeoutMs: number; loadExtensions: boolean };
   delegation: { enabledByDefault: boolean; allowFullContext: boolean; maxParallel: number };
+  observability: { metricsExportFile?: string; metricsExportMode: "off" | "onShutdown"; metricsExportTemplate: boolean };
 };
 
 export type LoadedWorkbenchConfigFile = { filePath: string; config: WorkbenchConfig; raw: Record<string, unknown> };
@@ -26,6 +28,7 @@ export const DEFAULT_WORKBENCH_CONFIG: WorkbenchConfig = {
   agents: { trustProjectAgents: false },
   subagents: { defaultTools: ["read", "grep", "find", "ls"], defaultTimeoutMs: 600_000, loadExtensions: false },
   delegation: { enabledByDefault: false, allowFullContext: false, maxParallel: 4 },
+  observability: { metricsExportMode: "off", metricsExportTemplate: false },
 };
 
 const toolPattern = /^[a-zA-Z0-9_.:-]+$/;
@@ -86,7 +89,7 @@ async function readConfigFile(filePath: string, diagnostics: WorkbenchDiagnostic
 }
 
 function validateConfig(raw: Record<string, unknown>, filePath: string, diagnostics: WorkbenchDiagnostic[]): WorkbenchConfig {
-  warnUnknown(raw, ["schemaVersion", "agents", "subagents", "delegation"], "", filePath, diagnostics);
+  warnUnknown(raw, ["schemaVersion", "agents", "subagents", "delegation", "observability"], "", filePath, diagnostics);
   const config = clone(DEFAULT_WORKBENCH_CONFIG);
   config.schemaVersion = 1;
   if (raw.agents !== undefined) {
@@ -111,22 +114,44 @@ function validateConfig(raw: Record<string, unknown>, filePath: string, diagnost
       config.delegation.maxParallel = readInt(raw.delegation.maxParallel, config.delegation.maxParallel, 1, 16, "delegation.maxParallel", filePath, diagnostics);
     } else invalid("delegation", filePath, diagnostics);
   }
+  if (raw.observability !== undefined) {
+    if (isObject(raw.observability)) {
+      warnUnknown(raw.observability, ["metricsExportFile", "metricsExportMode", "metricsExportTemplate"], "observability", filePath, diagnostics);
+      config.observability.metricsExportFile = readOptionalString(raw.observability.metricsExportFile, config.observability.metricsExportFile, "observability.metricsExportFile", filePath, diagnostics);
+      config.observability.metricsExportMode = readMode(raw.observability.metricsExportMode, config.observability.metricsExportMode, "observability.metricsExportMode", filePath, diagnostics);
+      config.observability.metricsExportTemplate = readBool(raw.observability.metricsExportTemplate, config.observability.metricsExportTemplate, "observability.metricsExportTemplate", filePath, diagnostics);
+      if (config.observability.metricsExportFile && raw.observability.metricsExportMode !== "off" && raw.observability.metricsExportMode !== "onShutdown") config.observability.metricsExportMode = "onShutdown";
+      if (config.observability.metricsExportMode !== "off" && !config.observability.metricsExportFile) invalid("observability.metricsExportFile", filePath, diagnostics);
+      if (config.observability.metricsExportFile && path.isAbsolute(config.observability.metricsExportFile) && filePath.includes(`${path.sep}.pi${path.sep}workbench${path.sep}config.json`)) {
+        diagnostics.push({ severity: "warning", code: "project_config_absolute_metrics_export", message: "project config uses an absolute metrics export path", filePath, fieldPath: "observability.metricsExportFile" });
+      }
+    } else invalid("observability", filePath, diagnostics);
+  }
   return config;
 }
 
+const presentConfigPaths = [
+  ["agents", "trustProjectAgents"],
+  ["subagents", "defaultTools"],
+  ["subagents", "defaultTimeoutMs"],
+  ["subagents", "loadExtensions"],
+  ["delegation", "enabledByDefault"],
+  ["delegation", "allowFullContext"],
+  ["delegation", "maxParallel"],
+  ["observability", "metricsExportFile"],
+  ["observability", "metricsExportMode"],
+  ["observability", "metricsExportTemplate"],
+];
+
 function mergePresentConfig(base: WorkbenchConfig, loaded: LoadedWorkbenchConfigFile): WorkbenchConfig {
-  const next = clone(base);
-  const raw = loaded.raw;
-  if (isObject(raw.agents) && "trustProjectAgents" in raw.agents) next.agents.trustProjectAgents = loaded.config.agents.trustProjectAgents;
-  if (isObject(raw.subagents)) {
-    if ("defaultTools" in raw.subagents) next.subagents.defaultTools = loaded.config.subagents.defaultTools;
-    if ("defaultTimeoutMs" in raw.subagents) next.subagents.defaultTimeoutMs = loaded.config.subagents.defaultTimeoutMs;
-    if ("loadExtensions" in raw.subagents) next.subagents.loadExtensions = loaded.config.subagents.loadExtensions;
-  }
-  if (isObject(raw.delegation)) {
-    if ("enabledByDefault" in raw.delegation) next.delegation.enabledByDefault = loaded.config.delegation.enabledByDefault;
-    if ("allowFullContext" in raw.delegation) next.delegation.allowFullContext = loaded.config.delegation.allowFullContext;
-    if ("maxParallel" in raw.delegation) next.delegation.maxParallel = loaded.config.delegation.maxParallel;
+  const next = overlayPresentFields(base as unknown as Record<string, unknown>, loaded.config as unknown as Record<string, unknown>, loaded.raw, presentConfigPaths.filter((p) => p[0] !== "observability")) as unknown as WorkbenchConfig;
+  if (isObject(loaded.raw.observability)) {
+    if (typeof loaded.raw.observability.metricsExportFile === "string" && loaded.raw.observability.metricsExportFile.trim()) {
+      next.observability.metricsExportFile = loaded.config.observability.metricsExportFile;
+      if (loaded.raw.observability.metricsExportMode !== "off" && loaded.raw.observability.metricsExportMode !== "onShutdown") next.observability.metricsExportMode = "onShutdown";
+    }
+    if (loaded.raw.observability.metricsExportMode === "off" || loaded.raw.observability.metricsExportMode === "onShutdown") next.observability.metricsExportMode = loaded.config.observability.metricsExportMode;
+    if (typeof loaded.raw.observability.metricsExportTemplate === "boolean") next.observability.metricsExportTemplate = loaded.config.observability.metricsExportTemplate;
   }
   return next;
 }
@@ -152,6 +177,18 @@ function readInt(value: unknown, fallback: number, min: number, max: number, fie
 function readTools(value: unknown, fallback: string[], fieldPath: string, filePath: string, diagnostics: WorkbenchDiagnostic[]): string[] {
   if (value === undefined) return fallback;
   if (Array.isArray(value) && value.every((item) => typeof item === "string" && item.length > 0 && toolPattern.test(item))) return [...value];
+  invalid(fieldPath, filePath, diagnostics);
+  return fallback;
+}
+function readOptionalString(value: unknown, fallback: string | undefined, fieldPath: string, filePath: string, diagnostics: WorkbenchDiagnostic[]): string | undefined {
+  if (value === undefined) return fallback;
+  if (typeof value === "string" && value.trim().length > 0) return value;
+  invalid(fieldPath, filePath, diagnostics);
+  return fallback;
+}
+function readMode(value: unknown, fallback: "off" | "onShutdown", fieldPath: string, filePath: string, diagnostics: WorkbenchDiagnostic[]): "off" | "onShutdown" {
+  if (value === undefined) return fallback;
+  if (value === "off" || value === "onShutdown") return value;
   invalid(fieldPath, filePath, diagnostics);
   return fallback;
 }

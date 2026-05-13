@@ -67,6 +67,7 @@ Detailed milestone specs live under `docs/implementation/milestones/`:
 1. `milestones/01-core-trace-foundation.md` — event/types/ids/trace store/metrics, including `subagent_start`, `subagent_end`, and core tests.
 2. `milestones/02-runtime-parent-observability.md` — runtime/run manager, one shared run per parent session, parent event persistence wired into `workbench.ts`.
 3. `milestones/03-config-agent-catalog.md` — global/project config loading, project-agent trust gate, markdown agent discovery/validation/warnings.
+3.1. `milestones/03-1-observability-metrics-export.md` — CLI/env/config-driven observability metrics export for headless runs, plus optional `/observe dump <file>`.
 4. `milestones/04-subagent-runner.md` — process-based child runner, model/IQ resolution, timeout/artifact handling, fake-process tests.
 5. `milestones/05-manual-subagent-commands.md` — `/subagent list`, `/subagent run`, `/subagent adhoc`, progress/status output backed by shared events.
 6. `milestones/06-delegation-mvp.md` — session-scoped `/delegation` commands, prompt/catalog injection, gated model-callable `subagent` tool, single/parallel mock-runner tests.
@@ -125,6 +126,7 @@ Archived component specs under `docs/implementation/archive/` may be used as ref
 - `npm test` passes offline.
 - Loading `src/extensions/workbench.ts` creates one shared parent run.
 - Parent events persist without subagents.
+- CLI/env/config-driven metrics export can write a small run metrics report for headless runs.
 - Manual subagent commands work with fake child runner tests.
 - Delegation is invisible/off until enabled.
 - Delegated tool can run single and parallel named subagents with mock runner tests.

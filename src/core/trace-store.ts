@@ -2,6 +2,7 @@ import fsSync from "node:fs";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { createRunId, createSpanId } from "./ids.js";
+import { writeJsonFileAtomic } from "./fs.js";
 import {
   applyEventToMetrics,
   createEmptyMetrics,
@@ -329,11 +330,8 @@ export class TraceStore {
     if (!isPathInsideOrEqual(this.tracesDir, normalized.traceFile)) throw new Error("Run traceFile is outside tracesDir");
     const expectedTrace = path.join(this.tracesDir, `${normalized.runId}.jsonl`);
     if (normalized.traceFile !== expectedTrace) throw new Error("Run traceFile must match runId");
-    await fs.mkdir(this.runsDir, { recursive: true });
     const file = runPath(this.runsDir, normalized.runId);
-    const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(normalized, null, 2));
-    await fs.rename(tmp, file);
+    await writeJsonFileAtomic(file, normalized, { createParentDirs: true });
   }
 
   async listRuns(): Promise<RunRecord[]> {
