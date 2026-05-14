@@ -4,7 +4,7 @@ Follow-on: `03-1-observability-metrics-export.md` extends the config surface wit
 
 ## Goal
 
-Implement configuration loading and markdown agent discovery/validation for named subagents.
+Implement configuration loading and markdown agent-profile discovery/validation for reusable named agent personas.
 
 This milestone should be expanded and maintained as an implementation-ready specification, similar in depth and structure to Milestone 02. Config and catalog behavior is policy-heavy enough that implementers should not need to infer defaults, precedence, diagnostics, parsing behavior, or test coverage from surrounding milestones.
 
@@ -21,13 +21,13 @@ Implement:
 
 - `src/config/workbench-config.ts`
 - `src/config/index.ts`
-- `src/subagents/agent-catalog.ts`
-- `src/subagents/index.ts`
+- `src/agents/agent-catalog.ts`
+- `src/agents/index.ts`
 - config loader
 - agent markdown parser
 - catalog discovery
 - trust/precedence rules
-- warnings/diagnostics suitable for `/subagent list` later
+- warnings/diagnostics suitable for `/agent list` later
 - read-only startup wiring from the cohesive `src/extensions/workbench.ts`
 
 Milestone 03 should load config and the agent catalog on workbench startup/reload after `runtime.start()` succeeds. Parent observability/run lifecycle should initialize even if config/catalog loading is broken. The wiring must remain read-only: do not implement process execution, manual `/subagent` commands, prompt injection, model-callable tools, or delegation.
@@ -44,11 +44,11 @@ type WorkbenchServices = {
 };
 ```
 
-`/observe status` should read diagnostic counts from this state and combine them with `runtime.getStatus()` output in the extension/status renderer. Keep `WorkbenchRuntimeStatus` focused on run lifecycle and trace health; do not add catalog state to the runtime API. Later `/subagent list`, runner, and delegation milestones should consume this shared loaded catalog instead of reloading independently.
+`/observe status` should read diagnostic counts from this state and combine them with `runtime.getStatus()` output in the extension/status renderer. Keep `WorkbenchRuntimeStatus` focused on run lifecycle and trace health; do not add catalog state to the runtime API. Later `/agent list`, handoff, runner, and delegation milestones should consume this shared loaded catalog instead of reloading independently.
 
-Normal config/catalog validation diagnostics should remain in runtime/status data and should not be emitted as observation trace events. If startup wiring encounters an unexpected loader exception, catch it so pi startup continues. Store an error diagnostic in startup state, keep parent observability working, and notify once via `ctx.ui.notify` when available with a concise message such as `workbench config/catalog load failed; subagents unavailable`. `/observe status` should reflect the config/catalog error count. Do not throw and break pi startup.
+Normal config/catalog validation diagnostics should remain in runtime/status data and should not be emitted as observation trace events. If startup wiring encounters an unexpected loader exception, catch it so pi startup continues. Store an error diagnostic in startup state, keep parent observability working, and notify once via `ctx.ui.notify` when available with a concise message such as `workbench config/catalog load failed; agent profiles unavailable`. `/observe status` should reflect the config/catalog error count. Do not throw and break pi startup.
 
-`/observe status` should include only terse config/catalog diagnostic counts when warnings/errors are present, for example `warnings: agent catalog warnings=2`. Do not print detailed diagnostics there, and do not introduce rich catalog browsing or subagent commands in Milestone 03.
+`/observe status` should include only terse config/catalog diagnostic counts when warnings/errors are present, for example `warnings: agent catalog warnings=2`. Do not print detailed diagnostics there, and do not introduce rich catalog browsing, handoff, or subagent execution commands in Milestone 03.
 
 ## Config API
 
@@ -234,7 +234,7 @@ Rules:
 - invalid config files produce diagnostics and the loader continues with defaults where possible
 - invalid individual agents produce diagnostics and that agent is skipped
 - unknown config or frontmatter fields produce warning diagnostics and loading continues
-- diagnostics should contain enough path/name/code detail for later `/subagent list` output and offline tests
+- diagnostics should contain enough path/name/code detail for later `/agent list` output and offline tests
 
 ## Catalog API
 
@@ -266,7 +266,7 @@ type LoadAgentCatalogInput = {
 Rules:
 
 - `agents` is the canonical loaded catalog representation
-- sort `agents` by name for stable `/subagent list`, tests, and later prompt/catalog injection
+- sort `agents` by name for stable `/agent list`, tests, and later prompt/catalog injection
 - `findAgent()` is case-sensitive and matches exact names only
 - MVP catalog sizes are expected to be small, so linear lookup over the sorted array is acceptable
 - lookup helpers may optimize internally later if needed, but the public catalog result should not store duplicate array/map state
@@ -302,7 +302,7 @@ If project agent `.md` files exist but trust is not enabled, this must not be si
 
 - do not load them
 - add one warning diagnostic summarizing the skipped project agent files, including count, agents directory path, and a reload/config hint
-- include useful reload/config hints for later `/subagent list`
+- include useful reload/config hints for later `/agent list`
 - evaluate trust before reading/parsing individual project agent files
 - when untrusted, count `.md` files for the summary diagnostic but do not parse their contents
 - do not emit one warning per file unless there is a distinct per-file problem that must be surfaced
@@ -363,7 +363,7 @@ Invalid individual agents must not fail startup/reload or prevent other agents f
 - add a structured diagnostic with file path, code, concise reason, and fix/reload hint when useful
 - avoid noisy per-agent user notifications during startup
 - allow `/observe status` to show terse warning/error counts
-- allow later `/subagent list` to display loaded agents plus skipped-agent diagnostics
+- allow later `/agent list` to display loaded agent profiles plus skipped-profile diagnostics
 
 Missing required fields, invalid names, invalid YAML, invalid tool lists, and same-tier duplicate conflicts are all handled by skipping the affected agent file with diagnostics rather than throwing.
 
@@ -371,7 +371,7 @@ Missing required fields, invalid names, invalid YAML, invalid tool lists, and sa
 
 `description` and the markdown body have different audiences:
 
-- `description` is short parent-facing catalog text. It helps later delegation prompt/tool guidance explain when the parent LLM should call a named subagent.
+- `description` is short parent-facing catalog text. It helps later handoff/delegation prompt/tool guidance explain when a named agent profile should be used.
 - The markdown body is the child-facing system prompt used when launching that subagent.
 
 Milestone 03 validates and stores both, but does not inject agent descriptions into the parent prompt. Delegation prompt/catalog injection is Milestone 06 behavior and remains gated by `/delegation on` or equivalent session-scoped enablement.
@@ -503,7 +503,7 @@ Update `README.md` minimally for implemented Milestone 03 behavior:
 - named agent markdown file locations
 - project agents require `agents.trustProjectAgents: true`
 - `/observe status` shows terse config/catalog warning/error counts when present
-- `/subagent` commands are not available until later milestones
+- `/agent`, `/handoff`, and `/subagent` commands are not available until later milestones
 
 Keep Milestone 03 README content brief. Do not add full user-agent documentation or an examples directory yet; richer docs/examples are better introduced with Milestone 05 when users can list and run agents. Do not document how to run subagents yet.
 
@@ -557,7 +557,7 @@ Test:
 2. Refactor/reuse core project path resolution so config/catalog and `TraceStore` use the same git-root/fallback behavior.
 3. Add `src/config/workbench-config.ts` with defaults, async config loading, validation, deep merge, diagnostics, and tests.
 4. Add `yaml` to runtime `dependencies` in `package.json`.
-5. Add `src/subagents/agent-catalog.ts` with YAML frontmatter parsing, validation helpers, trust gate, precedence, sorting, `findAgent()`, and tests.
+5. Add `src/agents/agent-catalog.ts` with YAML frontmatter parsing, validation helpers, trust gate, precedence, sorting, `findAgent()`, and tests.
 6. Wire read-only config/catalog loading into `src/extensions/workbench.ts` after `runtime.start()` and keep loaded state in an in-memory services object.
 7. Update `/observe status` rendering to include terse config/catalog warning/error counts.
 8. Update `README.md` minimally for implemented config/catalog discovery behavior.

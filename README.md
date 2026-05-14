@@ -32,6 +32,8 @@ Then run:
 /observe status
 ```
 
+For new-conversation context transitions, see [Handoff](docs/user/handoff.md).
+
 ## Development
 
 ```bash
@@ -155,7 +157,29 @@ Project config overrides global config field-by-field. The `observability.metric
 <project>/.pi/workbench/agents/*.md
 ```
 
-Project agents are skipped unless the effective config sets `agents.trustProjectAgents: true`. `/subagent` commands are not available yet.
+Project agents are skipped unless the effective config sets `agents.trustProjectAgents: true`. Named agents can be used as handoff target personas with `/handoff --to <agent>`. `/subagent` commands are not available yet.
+
+## Handoff Quick Start
+
+Manual handoff preserves your exact prompt in a durable artifact:
+
+```text
+/handoff --mode manual --prompt "Continue with the next focused task."
+```
+
+Static handoff packages selected files without summarization:
+
+```text
+/handoff --mode static --artifacts docs/plan.md --note "Use this as context"
+```
+
+Interactive handoff creates a draft successor conversation by default. Add `--start` or `--auto-start` to submit immediately. Export linked source/target metrics with:
+
+```text
+/observe dump --lineage lineage.json
+```
+
+See [docs/user/handoff.md](docs/user/handoff.md) for mode, artifact, target persona, and lineage details.
 
 ## Privacy
 

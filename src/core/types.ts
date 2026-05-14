@@ -2,6 +2,7 @@ export type ObservationSource =
   | "runtime"
   | "parent"
   | "subagent"
+  | "handoff"
   | "workflow"
   | "delegation"
   | "evaluator";
@@ -30,6 +31,10 @@ export type KnownObservationEventType =
   | "compaction"
   | "error"
   | "artifact"
+  | "handoff_start"
+  | "handoff_extract_start"
+  | "handoff_extract_end"
+  | "handoff_end"
   | "subagent_start"
   | "subagent_end";
 

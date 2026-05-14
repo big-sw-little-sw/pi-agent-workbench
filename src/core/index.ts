@@ -4,3 +4,4 @@ export * from "./metrics.js";
 export * from "./trace-store.js";
 export * from "./diagnostics.js";
 export * from "./fs.js";
+export * from "./slash-args.js";

@@ -18,3 +18,7 @@ export function createSpanId(): string {
 export function createAgentId(): string {
   return `agent_${hex(8)}`;
 }
+
+export function createHandoffId(): string {
+  return `handoff_${timestamp()}_${hex(6)}`;
+}

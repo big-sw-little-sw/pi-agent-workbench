@@ -29,6 +29,7 @@ MVP includes:
 - durable JSONL traces and run summaries
 - CLI/env/config-driven metrics export for headless observability
 - parent-session observability
+- new-conversation handoff with durable lineage records
 - process-based child pi runner
 - basic markdown agent definitions
 - simple model/IQ mapping
@@ -47,7 +48,8 @@ MVP excludes:
 - rich inspector/transcript browser
 - HTML reports
 - automatic fallback policy engine
-- summary/recent/selected context modes
+- summary/recent/selected subagent context modes
+- current-conversation replacement handoff
 
 ## Control Defaults
 

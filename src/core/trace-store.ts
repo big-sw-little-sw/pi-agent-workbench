@@ -12,7 +12,7 @@ import {
 } from "./metrics.js";
 import type { ControlMode, ObservationEvent, ObservationSource, RunMetrics, RunRecord, RunStatus } from "./types.js";
 
-const sources: readonly ObservationSource[] = ["runtime", "parent", "subagent", "workflow", "delegation", "evaluator"];
+const sources: readonly ObservationSource[] = ["runtime", "parent", "subagent", "handoff", "workflow", "delegation", "evaluator"];
 const controlModes: readonly ControlMode[] = ["manual", "workflow", "llm-delegated", "hybrid"];
 const statuses: readonly RunStatus[] = ["running", "detached", "completed", "failed", "aborted", "unknown"];
 

@@ -17,8 +17,9 @@ This milestone should be implementable after reading `AGENTS.md`, the required i
 
 Implement:
 
-- `/delegation on`
-- `/delegation off`
+- `/delegation subagents on` (canonical)
+- `/delegation subagents off` (canonical)
+- `/delegation on` / `/delegation off` as aliases for subagent delegation in MVP
 - `/delegation status`
 - delegation prompt/catalog injection
 - one generic model-callable `subagent` tool
@@ -31,10 +32,10 @@ Do not implement workflows/YAML, parent-LLM-created ad-hoc agents, recursive sub
 
 - Subagents are execution capability, not control policy.
 - Delegation is opt-in parent-LLM control.
-- `/delegation on` is session-scoped.
-- Startup config/flag may enable delegation.
+- `/delegation subagents on` is session-scoped; `/delegation on` is an MVP alias for subagent delegation.
+- Startup config/flag may enable subagent delegation.
 - Delegation is invisible/off until enabled.
-- `/delegation on` fails if no agents are loaded.
+- `/delegation subagents on` fails if no agents are loaded.
 - Manual subagent commands remain independent of delegation.
 - Delegation uses one generic model-callable `subagent` tool, not one tool per agent.
 - Delegation tool uses named loaded agents only.
@@ -126,6 +127,8 @@ Avoid double-emitting the same delegated tool call as both parent and delegation
 Child runner still emits `subagent_start`/`subagent_end` and child internals with `source: "subagent"`.
 
 ## `/delegation status`
+
+Show concise effective policy per capability. In this milestone only subagent delegation exists, but the status shape should allow later handoff delegation to appear separately.
 
 Show concise effective policy:
 

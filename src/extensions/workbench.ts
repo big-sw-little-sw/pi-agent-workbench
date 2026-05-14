@@ -1,9 +1,12 @@
+import { promises as fs } from "node:fs";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { registerParentObserver } from "../observability/parent-observer.js";
 import { emitMetricsExportError, exportMetricsReport, formatExportStatusLine, resolveMetricsExportOptions } from "../observability/metrics-export.js";
 import { relativeToCwd, WorkbenchRuntime, isWorkbenchRuntimeLink } from "../runtime/workbench-runtime.js";
 import { loadWorkbenchConfig } from "../config/workbench-config.js";
 import { loadAgentCatalog } from "../subagents/agent-catalog.js";
+import { parseSlashArgs } from "../core/slash-args.js";
+import { exportHandoffLineage, runHandoff, type HandoffRecord, type HandoffRequest, type HandoffSessionAdapter } from "../handoff/index.js";
 import type { WorkbenchRuntimeLink } from "../runtime/workbench-runtime.js";
 import type { RunRecord, RunMetrics } from "../core/types.js";
 import type { WorkbenchDiagnostic } from "../core/diagnostics.js";
@@ -67,11 +70,24 @@ function registerWorkbench(pi: ExtensionAPI, options: WorkbenchExtensionOptions)
         return;
       }
       if (parsed.kind === "dump") {
-        await dumpMetrics(runtime, parsed.file, parsed.template, ctx);
+        if (parsed.lineage) await dumpLineage(runtime, parsed.file, ctx);
+        else await dumpMetrics(runtime, parsed.file, parsed.template, ctx);
         return;
       }
-      ctx.ui.notify("usage: /observe status | /observe dump [--template] <file>", "info");
+      ctx.ui.notify("usage: /observe status | /observe dump [--lineage] [--template] <file>", "info");
     },
+  });
+
+  pi.registerCommand("handoff", {
+    description: "Create a new-conversation manual/static handoff",
+    handler: async (args, ctx) => handleHandoff(args, runtime, services, ctx),
+  });
+
+  pi.on("before_agent_start", async (event, ctx) => {
+    const entries = safeCall(() => ctx.sessionManager.getEntries()) ?? [];
+    const target = [...(entries as unknown[])].reverse().find((entry) => isHandoffTargetEntry(entry)) as { data?: { systemPrompt?: string } } | undefined;
+    if (!target?.data?.systemPrompt) return undefined;
+    return { systemPrompt: `${event.systemPrompt}\n\n${target.data.systemPrompt}` };
   });
 
   pi.on("session_shutdown", async (event, _ctx) => {
@@ -164,6 +180,153 @@ async function dumpMetrics(runtime: WorkbenchRuntime, file: string, template: bo
   }
 }
 
+async function dumpLineage(runtime: WorkbenchRuntime, file: string, ctx: ExtensionCommandContext): Promise<void> {
+  const run = runtime.getStatus().run;
+  if (!run) {
+    ctx.ui.notify("workbench: not initialized", "warning");
+    return;
+  }
+  try {
+    const result = await exportHandoffLineage({ store: runtime.store, currentRun: run, file, warnings: runtime.getStatus().warnings });
+    ctx.ui.notify(`workbench lineage exported: ${relativeToCwd(ctx.cwd, result.file)}`, result.report.warnings?.length ? "warning" : "info");
+  } catch (error) {
+    ctx.ui.notify(`workbench lineage export failed: ${shortMessage(error)}`, "warning");
+  }
+}
+
+async function handleHandoff(args: string, runtime: WorkbenchRuntime, services: WorkbenchServices, ctx: ExtensionCommandContext): Promise<void> {
+  const run = runtime.getStatus().run;
+  if (!run) { ctx.ui.notify("workbench: not initialized", "warning"); return; }
+  let request: HandoffRequest;
+  try {
+    request = parseHandoffArgs(args, ctx);
+  } catch (error) {
+    ctx.ui.notify(`handoff: ${shortMessage(error)}`, "warning");
+    return;
+  }
+  try {
+    const record = await runHandoff({
+      request,
+      sourceRun: run,
+      store: runtime.store,
+      sink: runtime,
+      catalog: services.agentCatalog,
+      adapter: createPiHandoffAdapter(ctx),
+    });
+    if (record.activation === "artifact_only") {
+      appendSourceHandoffMetadata(ctx, record);
+      const msg = record.status === "completed" ? "created" : "partial";
+      const promptLine = record.targetPromptArtifact ? `\nprompt: ${relativeToCwd(ctx.cwd, record.targetPromptArtifact.path)}` : "";
+      ctx.ui.notify(`handoff ${msg}: ${record.handoffId}${promptLine}`, record.status === "completed" ? "info" : "warning");
+    }
+  } catch (error) {
+    ctx.ui.notify(`handoff failed: ${shortMessage(error)}`, "warning");
+  }
+}
+
+function parseHandoffArgs(args: string, ctx: ExtensionCommandContext): HandoffRequest {
+  const parsed = parseSlashArgs(args, {
+    mode: { kind: "string" }, prompt: { kind: "string" }, to: { kind: "string" }, note: { kind: "string" },
+    artifact: { kind: "string", multiple: true }, artifacts: { kind: "stringList" }, start: { kind: "boolean" }, "auto-start": { kind: "boolean" },
+    "allow-partial-profile": { kind: "boolean" }, "allow-external-artifacts": { kind: "boolean" },
+  });
+  if (parsed.positionals.length) throw new Error("positional handoff goals are reserved for extractive handoff in 03-3; use --mode manual|static");
+  const mode = stringFlag(parsed.flags.mode);
+  if (mode !== "manual" && mode !== "static") throw new Error("extractive handoff comes in 03-3; use --mode manual or --mode static");
+  return {
+    method: mode,
+    prompt: stringFlag(parsed.flags.prompt),
+    artifacts: [...listFlag(parsed.flags.artifact), ...listFlag(parsed.flags.artifacts)],
+    note: stringFlag(parsed.flags.note),
+    targetAgentName: stringFlag(parsed.flags.to),
+    autoStart: parsed.flags.start === true || parsed.flags["auto-start"] === true,
+    headless: false,
+    allowPartialProfile: parsed.flags["allow-partial-profile"] === true,
+    allowExternalArtifacts: parsed.flags["allow-external-artifacts"] === true,
+    confirmPartialProfile: (message) => ctx.ui.confirm("Partial target profile", message),
+    confirmExternalArtifact: (message) => ctx.ui.confirm("External handoff artifact", message),
+    continueWithoutInvalidArtifact: (message, artifactPath) => ctx.ui.confirm("Invalid handoff artifact", `${message}\n\nContinue without ${relativeToCwd(ctx.cwd, artifactPath)}?`),
+    editPrompt: () => ctx.ui.editor("Manual handoff prompt", ""),
+  };
+}
+
+function createPiHandoffAdapter(ctx: ExtensionCommandContext): HandoffSessionAdapter {
+  return {
+    createDraft: async (input) => {
+      let sessionId: string | undefined;
+      let sessionFile: string | undefined;
+      appendSourceHandoffMetadata(ctx, recordFromSessionInput(input, "partial"));
+      const result = await ctx.newSession({
+        parentSession: input.parentSessionFile,
+        setup: async (sm) => setupTargetSession(sm, input),
+        withSession: async (targetCtx) => {
+          sessionId = safeCall(() => targetCtx.sessionManager.getSessionId());
+          sessionFile = safeCall(() => targetCtx.sessionManager.getSessionFile());
+          targetCtx.ui.setEditorText(await fs.readFile(input.promptArtifactPath, "utf8"));
+          targetCtx.ui.notify(`handoff draft created: ${input.handoffId}`, "info");
+        },
+      });
+      return { cancelled: result.cancelled, sessionId, sessionFile };
+    },
+    autoStart: async (input) => {
+      let sessionId: string | undefined;
+      let sessionFile: string | undefined;
+      let targetTask: { targetTaskStatus?: "completed" | "failed"; targetTaskErrorMessage?: string } = {};
+      appendSourceHandoffMetadata(ctx, recordFromSessionInput(input, "partial"));
+      const result = await ctx.newSession({
+        parentSession: input.parentSessionFile,
+        setup: async (sm) => setupTargetSession(sm, input),
+        withSession: async (targetCtx) => {
+          sessionId = safeCall(() => targetCtx.sessionManager.getSessionId());
+          sessionFile = safeCall(() => targetCtx.sessionManager.getSessionFile());
+          await targetCtx.sendUserMessage(input.prompt);
+          await targetCtx.waitForIdle();
+          targetTask = readTargetTaskStatus(targetCtx);
+          targetCtx.ui.notify(`handoff auto-start completed: ${input.handoffId}`, targetTask.targetTaskStatus === "failed" ? "warning" : "info");
+        },
+      });
+      return { cancelled: result.cancelled, sessionId, sessionFile, ...targetTask, ...readTargetTaskStatus(result) };
+    },
+  };
+}
+
+function appendSourceHandoffMetadata(ctx: ExtensionCommandContext, record: Pick<HandoffRecord, "handoffId" | "sourceRunId" | "sourceTraceId" | "targetRunId" | "targetTraceId" | "targetSessionId" | "targetSessionFile" | "targetPromptArtifact" | "status" | "targetTaskStatus">): void {
+  const manager = ctx.sessionManager as unknown as { appendCustomEntry?: (type: string, data: unknown) => void; appendSessionInfo?: (name: string) => void };
+  const metadata = { schemaVersion: 1, handoffId: record.handoffId, sourceRunId: record.sourceRunId, sourceTraceId: record.sourceTraceId, targetRunId: record.targetRunId, targetTraceId: record.targetTraceId, targetSessionId: record.targetSessionId, targetSessionFile: record.targetSessionFile, promptArtifact: record.targetPromptArtifact, status: record.status, targetTaskStatus: record.targetTaskStatus };
+  safeCall(() => manager.appendCustomEntry?.("workbench-handoff-source", metadata));
+  safeCall(() => manager.appendSessionInfo?.(`Workbench handoff ${record.handoffId}${record.targetRunId ? ` → ${record.targetRunId}` : ""}`));
+}
+
+function recordFromSessionInput(input: Parameters<HandoffSessionAdapter["createDraft"]>[0], status: HandoffRecord["status"]): Pick<HandoffRecord, "handoffId" | "sourceRunId" | "sourceTraceId" | "targetRunId" | "targetTraceId" | "targetSessionId" | "targetSessionFile" | "targetPromptArtifact" | "status" | "targetTaskStatus"> {
+  return {
+    handoffId: input.handoffId,
+    sourceRunId: input.sourceRun.runId,
+    sourceTraceId: input.sourceRun.traceId,
+    targetRunId: input.targetRun.runId,
+    targetTraceId: input.targetRun.traceId,
+    targetPromptArtifact: input.promptArtifact,
+    status,
+  };
+}
+
+function readTargetTaskStatus(value: unknown): { targetTaskStatus?: "completed" | "failed"; targetTaskErrorMessage?: string } {
+  // Pi interactive status probing is best-effort; API/headless adapters should return explicit targetTaskStatus/error when they can observe final target prompt status.
+  const candidate = value as { targetTaskStatus?: unknown; targetTaskErrorMessage?: unknown; lastTaskStatus?: unknown; lastTaskError?: unknown; getLastTaskStatus?: () => unknown; getLastPromptStatus?: () => unknown; getLastError?: () => unknown } | undefined;
+  const raw = safeCall(() => candidate?.getLastTaskStatus?.()) ?? safeCall(() => candidate?.getLastPromptStatus?.()) ?? candidate?.lastTaskStatus ?? candidate?.targetTaskStatus;
+  const status = typeof raw === "object" && raw !== null ? (raw as { status?: unknown; errorMessage?: unknown }) : { status: raw, errorMessage: undefined };
+  const error = status.errorMessage ?? candidate?.lastTaskError ?? candidate?.targetTaskErrorMessage ?? safeCall(() => candidate?.getLastError?.());
+  const errorMessage = error instanceof Error ? error.message : typeof error === "string" ? error : undefined;
+  return status.status === "completed" || status.status === "failed" ? { targetTaskStatus: status.status, targetTaskErrorMessage: errorMessage } : {};
+}
+
+async function setupTargetSession(sm: unknown, input: Parameters<HandoffSessionAdapter["createDraft"]>[0]): Promise<void> {
+  const manager = sm as { appendCustomEntry?: (type: string, data: unknown) => void; appendThinkingLevelChange?: (level: string) => void; appendSessionInfo?: (name: string) => void };
+  manager.appendCustomEntry?.(LINK_TYPE, input.runtimeLink);
+  manager.appendCustomEntry?.("workbench-handoff-target", { handoffId: input.handoffId, runId: input.targetRun.runId, traceId: input.targetRun.traceId, sourceRunId: input.sourceRun.runId, sourceTraceId: input.sourceRun.traceId, sourceSessionId: input.sourceRun.sessionId, sourceSessionFile: input.sourceRun.sessionFile, promptArtifact: input.promptArtifact, source: "handoff", agentName: input.targetAgent?.name, systemPrompt: input.targetAgent?.systemPrompt });
+  if (input.targetAgent?.thinking) manager.appendThinkingLevelChange?.(input.targetAgent.thinking);
+  manager.appendSessionInfo?.(input.title);
+}
+
 async function exportOnShutdown(runtime: WorkbenchRuntime, services: WorkbenchServices): Promise<void> {
   const options = services.metricsExport;
   const run = runtime.getStatus().run;
@@ -197,18 +360,31 @@ function readMetricsFlags(pi: ExtensionAPI): { file?: unknown; mode?: unknown; t
   };
 }
 
-function parseObserveArgs(args: string): { kind: "status" } | { kind: "dump"; file: string; template: boolean } | { kind: "invalid" } {
-  const parts = args.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0 || (parts.length === 1 && parts[0] === "status")) return { kind: "status" };
-  if (parts[0] !== "dump") return { kind: "invalid" };
-  let template = false;
-  let fileParts = parts.slice(1);
-  if (fileParts[0] === "--template") {
-    template = true;
-    fileParts = fileParts.slice(1);
+function parseObserveArgs(args: string): { kind: "status" } | { kind: "dump"; file: string; template: boolean; lineage: boolean } | { kind: "invalid" } {
+  try {
+    const parsed = parseSlashArgs(args, { template: { kind: "boolean" }, lineage: { kind: "boolean" } });
+    if (parsed.positionals.length === 0 || (parsed.positionals.length === 1 && parsed.positionals[0] === "status")) return { kind: "status" };
+    if (parsed.positionals[0] !== "dump") return { kind: "invalid" };
+    const file = parsed.positionals.slice(1).join(" ");
+    return file ? { kind: "dump", file, template: parsed.flags.template === true, lineage: parsed.flags.lineage === true } : { kind: "invalid" };
+  } catch {
+    return { kind: "invalid" };
   }
-  const file = fileParts.join(" ");
-  return file ? { kind: "dump", file, template } : { kind: "invalid" };
+}
+
+function stringFlag(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function listFlag(value: unknown): string[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [String(value)];
+}
+
+function isHandoffTargetEntry(entry: unknown): boolean {
+  if (typeof entry !== "object" || entry === null) return false;
+  const candidate = entry as { customType?: unknown; type?: unknown; data?: unknown };
+  return (candidate.customType === "workbench-handoff-target" || candidate.type === "workbench-handoff-target") && typeof candidate.data === "object";
 }
 
 export function formatMetrics(metrics: RunMetrics): string {

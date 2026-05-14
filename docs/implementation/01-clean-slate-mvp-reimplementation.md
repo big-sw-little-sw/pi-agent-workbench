@@ -68,9 +68,12 @@ Detailed milestone specs live under `docs/implementation/milestones/`:
 2. `milestones/02-runtime-parent-observability.md` — runtime/run manager, one shared run per parent session, parent event persistence wired into `workbench.ts`.
 3. `milestones/03-config-agent-catalog.md` — global/project config loading, project-agent trust gate, markdown agent discovery/validation/warnings.
 3.1. `milestones/03-1-observability-metrics-export.md` — CLI/env/config-driven observability metrics export for headless runs, plus optional `/observe dump <file>`.
+3.2. `milestones/03-2-handoff-foundation.md` — manual/static new-conversation handoff foundation with durable records/artifacts, successor sessions, target agent persona support, and lineage export.
+3.3. `milestones/03-3-extractive-handoff.md` — extractive LLM handoff with compact transcript, built-in extractor, budgeting/redaction, and generated structured target prompts.
 4. `milestones/04-subagent-runner.md` — process-based child runner, model/IQ resolution, timeout/artifact handling, fake-process tests.
-5. `milestones/05-manual-subagent-commands.md` — `/subagent list`, `/subagent run`, `/subagent adhoc`, progress/status output backed by shared events.
+5. `milestones/05-manual-subagent-commands.md` — `/agent list`, `/agent show`, `/subagent run`, `/subagent adhoc`, progress/status output backed by shared events.
 6. `milestones/06-delegation-mvp.md` — session-scoped `/delegation` commands, prompt/catalog injection, gated model-callable `subagent` tool, single/parallel mock-runner tests.
+6.1. `milestones/06-1-delegated-handoff.md` — post-MVP/follow-on gated model-callable handoff, reusing handoff lineage and delegation policy boundaries.
 7. `milestones/07-live-state-monitor-hardening.md` — reducer/projections, concise status display, final offline validation/demo cleanup.
 
 Archived component specs under `docs/implementation/archive/` may be used as references for each milestone, but this file, the milestone files, and the principles/contracts docs remain the active source of truth.
@@ -79,9 +82,14 @@ Archived component specs under `docs/implementation/archive/` may be used as ref
 
 - Agents are named markdown definitions loaded from configured paths; examples are reference-only.
 - Project agents require `agents.trustProjectAgents: true` in MVP.
-- Delegation is opt-in and session-scoped; startup config/flag may enable it.
-- `/delegation on` fails if no agents are loaded.
+- Delegation is opt-in and session-scoped; startup config/flag may enable subagent delegation.
+- `/delegation subagents on` is canonical; `/delegation on` is an MVP alias for subagent delegation.
+- `/delegation subagents on` fails if no agents are loaded.
 - Delegation tool uses named agents only; LLM-created ad-hoc agents are post-MVP.
+- Handoff is a context-transition feature, not subagent execution; MVP handoff creates successor conversations only and does not replace the current conversation.
+- When handoff creates a successor session, it creates a new linked workbench run for that session; source and target metrics remain per-run, with minimal lineage export for combined/per-run reporting. Headless artifact-only handoff may have no target run yet.
+- Model-callable/delegated handoff is post-MVP and must be separately gated/opt-in; enabling subagent delegation does not implicitly enable handoff delegation.
+- Agent definitions are reusable agent profiles/personas; handoff may target named agents, while subagent execution and delegation are later consumers of the same catalog.
 - Manual `/subagent adhoc` supports unnamed user-controlled subagents.
 - Child runner uses subprocess `pi --mode json -p --no-session` with piped/ignored stdio.
 - Child runs use same cwd as parent for MVP.
@@ -101,8 +109,8 @@ Archived component specs under `docs/implementation/archive/` may be used as ref
 
 ## Resolved Core Implementation Decisions
 
-- Known event types include `run_start`, `runtime_attach`, `runtime_detach`, `run_end`, `prompt_start`, `prompt_end`, turn/message/tool lifecycle events, `usage`, `rate_limit`, `retry`, `fallback`, `compaction`, `error`, `artifact`, `subagent_start`, and `subagent_end`; the event type remains open to future strings.
-- `ObservationSource` includes `runtime` for workbench-owned lifecycle/infrastructure events.
+- Known event types include `run_start`, `runtime_attach`, `runtime_detach`, `run_end`, `prompt_start`, `prompt_end`, turn/message/tool lifecycle events, `usage`, `rate_limit`, `retry`, `fallback`, `compaction`, `error`, `artifact`, `handoff_start`, `handoff_extract_start`, `handoff_extract_end`, `handoff_end`, `subagent_start`, and `subagent_end`; the event type remains open to future strings.
+- `ObservationSource` includes `runtime` for workbench-owned lifecycle/infrastructure events and `handoff` for handoff lifecycle/extraction events.
 - Keep `RunRecord.controlMode` as the run default/initial mode, but event-level `controlMode` is the source of truth for mixed manual/delegated sessions.
 - Persist logical run lifecycle and runtime attachment events in the trace as canonical history; `RunRecord` remains the mutable summary.
 - `run_start` means logical observation-run creation; `runtime_attach`/`runtime_detach` mean extension runtime attachment/detachment; `run_end` is reserved for explicit logical run finalization.

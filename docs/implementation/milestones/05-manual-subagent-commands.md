@@ -2,7 +2,7 @@
 
 ## Goal
 
-Expose user-controlled manual subagent commands backed by the shared runtime, catalog, and runner.
+Expose user-controlled manual subagent execution commands backed by the shared runtime, shared agent-profile catalog, and runner.
 
 This milestone should be implementable after reading `AGENTS.md`, the required implementation docs, prior milestone docs as needed, and this file.
 
@@ -16,7 +16,8 @@ This milestone should be implementable after reading `AGENTS.md`, the required i
 
 Implement:
 
-- `/subagent list`
+- `/agent list`
+- `/agent show <name>`
 - `/subagent run`
 - `/subagent adhoc`
 - concise manual progress/status output using shared observation events where practical
@@ -32,7 +33,9 @@ Manual subagent commands are independent of delegation.
 - They may run named agents or ad-hoc user-specified prompts.
 - They work whether delegation is on or off.
 
-## `/subagent list`
+## `/agent list`
+
+Show reusable agent profiles/personas from the shared catalog. These profiles may be consumed by handoff, manual subagent execution, and later delegation.
 
 Show:
 
@@ -45,9 +48,13 @@ Show:
 - invalid/duplicate-agent warnings
 - useful hints such as enabling `agents.trustProjectAgents` or using normal pi `/reload`
 
+## `/agent show <name>`
+
+Show one loaded agent profile/persona, including source, description, model/IQ/thinking, tool allowlist, prompt mode, context-file setting, and source path when useful.
+
 ## `/subagent run`
 
-Runs a named loaded agent.
+Runs a named loaded agent profile as a child subagent.
 
 MVP behavior:
 
@@ -129,7 +136,7 @@ docs/user/agents.md
 examples/agents/code-reviewer.md
 ```
 
-`docs/user/agents.md` should cover config locations, agent locations, frontmatter fields, trust behavior, diagnostics/status behavior, `/subagent list`, `/subagent run`, `/subagent adhoc`, and concise examples of global/project agents.
+`docs/user/agents.md` should cover config locations, agent-profile locations, frontmatter fields, trust behavior, diagnostics/status behavior, `/agent list`, `/agent show`, `/subagent run`, `/subagent adhoc`, handoff target usage where implemented, and concise examples of global/project profiles.
 
 `examples/agents/code-reviewer.md` should be reference-only copy/paste material for a simple named agent. Keep examples small and aligned with the Milestone 03 catalog contract.
 
@@ -149,7 +156,8 @@ No real pi/model calls.
 
 Test:
 
-- list loaded agents and warnings
+- list loaded agent profiles and warnings
+- show one loaded agent profile
 - run named agent request construction
 - ad-hoc prompt mode flags
 - explicit full context behavior
@@ -160,7 +168,8 @@ Test:
 
 - `npm test` passes offline.
 - Manual commands do not require delegation.
-- `/subagent list` shows loaded agents plus warnings/hints.
+- `/agent list` shows loaded agent profiles plus warnings/hints.
+- `/agent show <name>` shows one loaded profile or a clear missing-profile error.
 - `/subagent run` invokes the runner with the expected named agent request.
 - `/subagent adhoc` supports append/replace prompt modes and context-file flags.
 - Manual full context is explicit and trace-recorded.
